@@ -16,7 +16,7 @@ import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
-/** No automatic mutation retries, redirects, cookies, cache, credentials or HTTP logging. */
+/** No automatic mutation retries, redirects, cookies, cache, credentials or HTTP body logging. */
 class HttpOnboardingApi internal constructor(
     baseUrl: String,
     client: OkHttpClient,
@@ -76,23 +76,32 @@ class HttpOnboardingApi internal constructor(
                     header("Idempotency-Key", key)
                 }
             }.method(method, bytes?.toRequestBody("application/json; charset=utf-8".toMediaType())).build()
+        val operation = "$method ${OnboardingLog.route(path)}"
+        val trace = requestSequence.incrementAndGet()
+        val startedAt = System.nanoTime()
+        OnboardingLog.debug("http[$trace] start $operation")
         return suspendCancellableCoroutine { continuation ->
             val call = http.newCall(request)
-            continuation.invokeOnCancellation { call.cancel() }
+            continuation.invokeOnCancellation { OnboardingLog.debug("http[$trace] cancelled $operation"); call.cancel() }
             call.enqueue(object : Callback {
                 override fun onFailure(call: Call, e: IOException) {
+                    OnboardingLog.warning("http[$trace] transport failure $operation type=${e.javaClass.simpleName}")
                     if (!continuation.isCancelled) continuation.resumeWithException(IOException("Onboarding connection failed"))
                 }
                 override fun onResponse(call: Call, response: Response) {
                     response.use {
+                        OnboardingLog.debug("http[$trace] response $operation status=${response.code} elapsedMs=${(System.nanoTime() - startedAt) / 1_000_000}")
                         try {
                             val source = response.body?.source() ?: throw OnboardingProtocolException()
                             source.request(262145)
                             if (source.buffer.size > 262144) throw OnboardingProtocolException()
                             val json = try { JSONObject(source.readUtf8()) } catch (_: Exception) { throw OnboardingProtocolException() }
+                            if (!response.isSuccessful) OnboardingLog.warning("http[$trace] rejected code=${OnboardingLog.label(json.optString("code"))} requestId=${OnboardingLog.label(json.optString("requestId"))}")
+                            else OnboardingLog.debug("http[$trace] accepted state=${OnboardingLog.label(json.optString("status"))}")
                             if (!response.isSuccessful) throw OnboardingApiException(response.code, json.optString("code", "request_failed"))
                             continuation.resume(json)
                         } catch (e: Exception) {
+                            OnboardingLog.warning("http[$trace] response failure type=${e.javaClass.simpleName}")
                             if (!continuation.isCancelled) continuation.resumeWithException(e)
                         }
                     }
@@ -102,7 +111,11 @@ class HttpOnboardingApi internal constructor(
     }
     private inline fun <T> decode(block: () -> T): T = try { block() }
     catch (e: IOException) { throw e }
-    catch (_: Exception) { throw OnboardingProtocolException() }
+    catch (e: Exception) {
+        OnboardingLog.warning("Response decoding failed type=${e.javaClass.simpleName}")
+        throw OnboardingProtocolException()
+    }
+    private companion object { val requestSequence = java.util.concurrent.atomic.AtomicLong() }
 }
 
 internal fun obj(vararg values: Pair<String, Any>): JSONObject = JSONObject().apply { values.forEach { (k, v) -> put(k, v) } }

@@ -17,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.apexfission.android.auth.onboarding.HttpOnboardingApi
+import com.apexfission.android.auth.onboarding.OnboardingLogging
 import com.apexfission.android.auth.onboarding.OnboardingScreen
 import com.apexfission.android.auth.onboarding.OnboardingViewModel
 import com.apexfission.android.ui.theme.AuthTheme
@@ -24,6 +25,7 @@ import com.apexfission.android.ui.theme.AuthTheme
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        OnboardingLogging.enabled = BuildConfig.DEBUG
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         enableEdgeToEdge()
         setContent {

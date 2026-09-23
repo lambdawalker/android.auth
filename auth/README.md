@@ -124,3 +124,9 @@ All paths below are under the supplied `/v1` base URL. Mutations use a random `I
 ## Verification
 
 Tests cover HTTP paths, JSON encoding, capabilities/idempotency headers, HTTPS enforcement, response/error handling, passkey and password/TOTP progression, email-last ordering, duplicate taps, retry key reuse, uncertain enrollment and bounded activation polling. Real-device validation is still required for Credential Manager, fingerprint/PIN prompts, autofill, rotation during a provider dialog, SES delivery and final login handoff.
+
+## Debug logs
+
+The sample enables diagnostics only when `BuildConfig.DEBUG` is true. In Android Studio Logcat, filter with `tag:onboarding`. Other host apps can opt in with `OnboardingLogging.enabled = BuildConfig.DEBUG`.
+
+Logs include redacted endpoint paths, local request sequence numbers, HTTP status and elapsed time, backend error codes/request IDs, session transitions, recovery decisions, and Credential Manager exception/DOM-error types. They exclude emails, names, session/setup IDs, headers, idempotency keys, passwords, OTPs, TOTP secrets and credential bodies. There is no HTTP body logger. Disable logging in release builds. Android logs report the backend's public error code; the underlying Cognito failure still requires server-side diagnostics.

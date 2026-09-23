@@ -13,10 +13,11 @@ class AndroidCredentials {
 
     suspend fun createPasskey(activity: Activity, creationOptionsJson: String): String {
         check(supportsPasskeys) { "Passkeys require Android 9 or later" }
-        val result = CredentialManager.create(activity).createCredential(
+        val result = diagnostic("passkey-create") { CredentialManager.create(activity).createCredential(
             context = activity,
             request = CreatePublicKeyCredentialRequest(requestJson = creationOptionsJson),
         )
+        }
         // Do not override origin/clientDataHash or modify server challenge or RP options.
         return (result as? CreatePublicKeyCredentialResponse)?.registrationResponseJson
             ?: throw OnboardingProtocolException()
@@ -24,9 +25,20 @@ class AndroidCredentials {
 
     /** Optional password-manager save. A cancelled save never changes backend enrollment. */
     suspend fun savePassword(activity: Activity, email: String, password: String) {
-        CredentialManager.create(activity).createCredential(
+        diagnostic("password-manager-save") { CredentialManager.create(activity).createCredential(
             context = activity,
             request = CreatePasswordRequest(id = email, password = password),
-        )
+        ) }
+    }
+
+    private suspend fun <T> diagnostic(operation: String, block: suspend () -> T): T {
+        OnboardingLog.debug("Credential Manager $operation started")
+        try {
+            return block().also { OnboardingLog.debug("Credential Manager $operation completed") }
+        } catch (e: Exception) {
+            val dom = (e as? androidx.credentials.exceptions.publickeycredential.CreatePublicKeyCredentialDomException)?.domError?.javaClass?.simpleName
+            OnboardingLog.warning("Credential Manager $operation failed type=${e.javaClass.simpleName} dom=${dom ?: "none"}")
+            throw e
+        }
     }
 }

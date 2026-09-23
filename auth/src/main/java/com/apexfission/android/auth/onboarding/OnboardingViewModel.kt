@@ -59,6 +59,7 @@ class OnboardingViewModel(
     }
 
     fun chooseMethod(method: EnrollmentMethod) {
+        OnboardingLog.debug("Credential method selected: ${method.wire}")
         val session = active() ?: return
         if (session.status != SessionStatus.CREDENTIALS || state.value.setup != null) return
         val cap = capability ?: return
@@ -151,6 +152,7 @@ class OnboardingViewModel(
             val previous = state.value.setup
             if (current.status == SessionStatus.CREDENTIALS && previous != null) {
                 execute({ api.setupStatus(cap, previous.id) }) { fresh ->
+                    OnboardingLog.debug("Setup reconciliation state=${OnboardingLog.label(fresh.status)} hasCreationOptions=${previous.creationOptions != null} hasTotpSecret=${previous.secret != null}")
                     val restored = CredentialSetup(fresh.id, fresh.method, fresh.status, fresh.expiresAt, previous.creationOptions, previous.secret)
                     mutable.value = state.value.copy(setup = restored)
                     if (fresh.status == "uncertain" || (fresh.status == "passkey-pending" && restored.creationOptions == null) || (fresh.status == "totp-pending" && restored.secret == null)) {
@@ -162,6 +164,7 @@ class OnboardingViewModel(
     }
 
     fun retry() {
+        OnboardingLog.debug("Retry requested busy=${state.value.busy} pending=${pending != null}")
         if (state.value.busy) return
         if (System.nanoTime() - pendingSince >= 240_000_000_000L) {
             requireRestart("The retry window expired. Check status or start again."); return
@@ -169,6 +172,7 @@ class OnboardingViewModel(
         pending?.invoke()
     }
     fun restart() {
+        OnboardingLog.debug("Onboarding restarted; clearing local session")
         generation++
         job?.cancel()
         job = null
@@ -186,6 +190,7 @@ class OnboardingViewModel(
     }
 
     private fun applySession(session: OnboardingSession) {
+        OnboardingLog.debug("Session transition ${state.value.session?.status?.wire ?: "none"} -> ${session.status.wire}")
         mutable.value = state.value.copy(session = session, setup = if (session.status == SessionStatus.CREDENTIALS) state.value.setup else null)
         if (session.status == SessionStatus.COMPLETE) { capability = null; pending = null }
         if (session.status == SessionStatus.FAILED) requireRestart("Account creation could not be completed. Sign in to an existing account or start again.")
@@ -221,7 +226,10 @@ class OnboardingViewModel(
         return session
     }
     private fun <T> execute(call: suspend () -> T, apply: (T) -> Unit) {
-        if (state.value.busy || pending != null || state.value.restartRequired) return
+        if (state.value.busy || pending != null || state.value.restartRequired) {
+            OnboardingLog.debug("Operation blocked busy=${state.value.busy} pending=${pending != null} restartRequired=${state.value.restartRequired}")
+            return
+        }
         pendingSince = System.nanoTime()
         val currentGeneration = generation
         val task: () -> Unit = {
@@ -236,6 +244,7 @@ class OnboardingViewModel(
                     }
                 } catch (e: CancellationException) { throw e }
                 catch (e: OnboardingApiException) {
+                    OnboardingLog.warning("API failure status=${e.statusCode} code=${OnboardingLog.label(e.code)}")
                     if (generation == currentGeneration) {
                         if (e.code == "operation_in_progress") {
                             mutable.value = state.value.copy(busy = false, canRetry = true, message = "The previous request is still processing. Wait a moment, then retry the same request.")
@@ -268,7 +277,7 @@ class OnboardingViewModel(
         task()
     }
     private fun message(value: String) { mutable.value = state.value.copy(message = value) }
-    private fun requireRestart(value: String) { pending = null; mutable.value = state.value.copy(message = value, canRetry = false, restartRequired = true) }
+    private fun requireRestart(value: String) { OnboardingLog.warning("Restart required: $value"); pending = null; mutable.value = state.value.copy(message = value, canRetry = false, restartRequired = true) }
     private fun key() = UUID.randomUUID().toString()
 
     companion object {
